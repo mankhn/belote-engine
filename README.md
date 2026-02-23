@@ -4,7 +4,7 @@
 
 Create a virtual environment to isolate dependencies.   
 ```bash
-python3 -m venv bin
+python3 -m venv ./
 ``` 
 
 Activate the environment and set up the path.

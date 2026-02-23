@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 from src.phases.play.core.state import State
 from src.phases.play.core.agent import Agent
 from src.phases.play.core.actions import Action, ActionPlayCard
@@ -8,7 +8,7 @@ from src.utility.cards import Cards
 class SoftPlayerAgent(Agent):
     """Soft player agent that tries to lose the trick"""
     
-    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Dict[str, Any] | None]:
+    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Optional[Dict[str, Any]]]:
         """Choose the card that loses the trick, or lowest value card"""
         # Filter for play card actions only
         play_actions = [action for action in actions if isinstance(action, ActionPlayCard)]

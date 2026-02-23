@@ -1,4 +1,5 @@
 import copy
+from typing import Optional
 from .state import State
 from .actions import Action
 
@@ -6,7 +7,7 @@ from .actions import Action
 Record represents a single played action in the game.
 """
 class Record:
-    def __init__(self, player: int, state: State, action: Action, log: dict | None, instant_reward: int, accrued_reward: int):
+    def __init__(self, player: int, state: State, action: Action, log: Optional[dict], instant_reward: int, accrued_reward: int):
         self.player = player
         self.state = copy.deepcopy(state)
         self.action = copy.deepcopy(action)

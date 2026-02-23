@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 from .state import State
 from .actions import Action
 
 class Agent(ABC):
     
     @abstractmethod
-    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Dict[str, Any] | None]:
+    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Optional[Dict[str, Any]]]:
         """
         Choose an action based on the current game state.
         

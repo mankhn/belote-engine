@@ -28,86 +28,27 @@ class Card:
         diff = self.value(trump) - next.value(trump)
         return diff > 0 if diff != 0 else self.rank > next.rank
     
+    _NO_TRUMP_VALUES = {7: 19, 3: 10, 6: 4, 5: 3, 4: 2, 2: 0, 1: 0, 0: 0}
+    _ALL_TRUMP_VALUES = {4: 14, 2: 9, 7: 7, 3: 5, 6: 3, 5: 2, 1: 0, 0: 0}
+    _REGULAR_TRUMP_VALUES = {4: 20, 2: 14, 7: 11, 3: 10, 6: 4, 5: 3, 1: 0, 0: 0}
+    _REGULAR_NON_TRUMP_VALUES = {7: 11, 3: 10, 6: 4, 5: 3, 4: 2, 2: 0, 1: 0, 0: 0}
+
     def value(self, trump: Trump) -> int:
         # No Trump mode
         if trump.mode == TrumpMode.NoTrump:
-            match self.rank:
-                case 7:  # ACE
-                    return 19
-                case 3:  # TEN
-                    return 10
-                case 6:  # KING
-                    return 4
-                case 5:  # QUEEN
-                    return 3
-                case 4:  # JACK
-                    return 2
-                case 2:  # NINE
-                    return 0
-                case 1:  # EIGHT
-                    return 0
-                case 0:  # SEVEN
-                    return 0
-        
+            return self._NO_TRUMP_VALUES[self.rank]
+
         # All Trump mode
         elif trump.mode == TrumpMode.AllTrump:
-            match self.rank:
-                case 4:  # JACK
-                    return 14
-                case 2:  # NINE
-                    return 9
-                case 7:  # ACE
-                    return 7
-                case 3:  # TEN
-                    return 5
-                case 6:  # KING
-                    return 3
-                case 5:  # QUEEN
-                    return 2
-                case 1:  # EIGHT
-                    return 0
-                case 0:  # SEVEN
-                    return 0
-        
+            return self._ALL_TRUMP_VALUES[self.rank]
+
         # Regular (Trump suit) mode
         elif trump.mode == TrumpMode.Regular:
             if self.suit == trump.suit:
-                match self.rank:
-                    case 4:  # JACK (trump)
-                        return 20
-                    case 2:  # NINE (trump)
-                        return 14
-                    case 7:  # ACE
-                        return 11
-                    case 3:  # TEN
-                        return 10
-                    case 6:  # KING
-                        return 4
-                    case 5:  # QUEEN
-                        return 3
-                    case 1:  # EIGHT
-                        return 0
-                    case 0:  # SEVEN
-                        return 0
+                return self._REGULAR_TRUMP_VALUES[self.rank]
             else:
-                match self.rank:
-                    case 7:  # ACE
-                        return 11
-                    case 3:  # TEN
-                        return 10
-                    case 6:  # KING
-                        return 4
-                    case 5:  # QUEEN
-                        return 3
-                    case 4:  # JACK
-                        return 2
-                    case 2:  # NINE
-                        return 0
-                    case 1:  # EIGHT
-                        return 0
-                    case 0:  # SEVEN
-                        return 0
-        
+                return self._REGULAR_NON_TRUMP_VALUES[self.rank]
+
         # Default fallback
         raise ValueError(f"Unknown trump mode: {trump.mode}")
     

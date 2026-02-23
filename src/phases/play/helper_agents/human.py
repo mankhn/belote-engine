@@ -1,13 +1,13 @@
 
 from src.phases.play.core.state import State
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 from src.phases.play.core.agent import Agent
 from src.phases.play.core.actions import Action, ActionPlayCard
 
 class HumanAgent(Agent):
     """Human player agent that prompts for input"""
     
-    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Dict[str, Any] | None]:
+    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Optional[Dict[str, Any]]]:
         """Prompt human player to choose an action"""
         # Filter valid play card actions
         valid_play_actions = [action for action in actions if isinstance(action, ActionPlayCard)]

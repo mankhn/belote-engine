@@ -1,3 +1,4 @@
+from typing import Optional
 from src.suits import Suits
 from enum import IntEnum
 
@@ -7,7 +8,7 @@ class TrumpMode(IntEnum):
     AllTrump = 3
 
 class Trump:
-    def __init__(self, mode: int, suit: int | None):
+    def __init__(self, mode: int, suit: Optional[int] = None):
         assert mode in [TrumpMode.Regular, TrumpMode.NoTrump, TrumpMode.AllTrump], f"Invalid mode: {mode}"
         assert suit is None or 0 <= suit <= 3, f"Invalid suit: {suit}"
         self.mode = mode

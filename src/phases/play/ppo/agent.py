@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 from collections import namedtuple
 
 from src.phases.play.core.agent import Agent
@@ -15,14 +15,14 @@ BatchedState = namedtuple('BatchedState', ['probabilities', 'tables', 'history',
 
 
 class PpoAgent(Agent):
-    def __init__(self, network: PPONetwork, rng: np.random.Generator | None = None):
+    def __init__(self, network: PPONetwork, rng: Optional[np.random.Generator] = None):
         super().__init__()
         self.network = network
         self.device = next(network.parameters()).device
         self.optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-5)
         self.rng = rng if rng is not None else np.random.default_rng(42)
 
-    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Dict[str, Any] | None]:
+    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Optional[Dict[str, Any]]]:
         """
         Choose an action based on the current game state.
         """

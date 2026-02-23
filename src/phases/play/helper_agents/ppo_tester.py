@@ -1,6 +1,6 @@
 import random
 from src.phases.play.core.state import State
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from src.phases.play.core.actions import Action, ActionPass
 from src.phases.play.core.result import Result
@@ -16,7 +16,7 @@ class PpoTester(PpoAgent):
         super().__init__(*args)
         PpoTester.result = result
 
-    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Dict[str, Any] | None]:
+    def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Optional[Dict[str, Any]]]:
         record = PpoTester.result.records[PpoTester.cursor]
         recorded_action = record.action
         PpoTester.cursor += 1
