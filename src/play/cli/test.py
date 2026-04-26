@@ -1,10 +1,16 @@
 import os
+import sys
 import torch
 import pickle
 import argparse
 
+# Add the project root to the python path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+sys.path.append(PROJECT_ROOT)
+
 from src.play.core.rules import Rules
 from src.play.core.simulator import Simulator
+from src.play.kits.state import StateKit
 from src.play.ppo.network import PPONetwork
 from src.play.helper_agents.ppo_tester import PpoTester
 
@@ -18,6 +24,8 @@ def main():
 
     # Load the recorded game
     load_path = args.record
+    if not os.path.isabs(load_path):
+        load_path = os.path.join(PROJECT_ROOT, load_path)
     if not os.path.exists(load_path):
         print(f"Error: {load_path} not found. Please run record.py first.")
         return
@@ -31,6 +39,12 @@ def main():
     trump        = result["trump"]
     start_player = result["start_player"]
 
+    # Re-wrap state dicts in StateKit (records were stored as plain primitives)
+    records = [
+        (player, StateKit(state), action, reward, log)
+        for (player, state, action, reward, log) in records
+    ]
+
     if not records:
         print("No records found in the loaded game.")
         return
@@ -39,6 +53,8 @@ def main():
     print("Loading PPO Agent...")
     network = PPONetwork()
     model_path = args.model
+    if not os.path.isabs(model_path):
+        model_path = os.path.join(PROJECT_ROOT, model_path)
 
     if not os.path.exists(model_path):
         print(f"Error: {model_path} not found. Please run training first.")
