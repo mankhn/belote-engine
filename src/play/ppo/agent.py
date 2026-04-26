@@ -55,9 +55,9 @@ class PpoAgent(Agent):
             'log_prob': log_prob.item(),
             'value': value.item(),
             'state': {
-                'probability': state_batch['probability'].cpu().numpy(),
-                'table':       state_batch['table'].cpu().numpy(),
-                'history':     state_batch['history'].cpu().numpy(),
+                'probabilities': state_batch['probabilities'].cpu().numpy(),
+                'tables':        state_batch['tables'].cpu().numpy(),
+                'history':       state_batch['history'].cpu().numpy(),
             },
             'action_idx': action_idx,
             'mask': mask.cpu().numpy(),
@@ -81,28 +81,29 @@ class PpoAgent(Agent):
         ppo_epochs     = 4
         batch_size     = 64
 
+        # Record is a tuple: (player, state, action, reward, log) → log is r[4]
         probs = torch.tensor(
-            np.array([r.log['state']['probability'] for r in records]),
+            np.array([r[4]['state']['probabilities'] for r in records]),
             dtype=torch.float32, device=self.device,
         ).squeeze(1)
         tables = torch.tensor(
-            np.array([r.log['state']['table'] for r in records]),
+            np.array([r[4]['state']['tables'] for r in records]),
             dtype=torch.long, device=self.device,
         ).squeeze(1)
         histories = torch.tensor(
-            np.array([r.log['state']['history'] for r in records]),
+            np.array([r[4]['state']['history'] for r in records]),
             dtype=torch.float32, device=self.device,
         ).squeeze(1)
 
-        actions      = torch.tensor([r.log['action_idx'] for r in records], dtype=torch.long,    device=self.device)
-        old_log_probs = torch.tensor([r.log['log_prob']   for r in records], dtype=torch.float32, device=self.device)
-        masks        = torch.tensor(np.array([r.log['mask'] for r in records]), dtype=torch.float32, device=self.device)
+        actions       = torch.tensor([r[4]['action_idx'] for r in records], dtype=torch.long,    device=self.device)
+        old_log_probs = torch.tensor([r[4]['log_prob']   for r in records], dtype=torch.float32, device=self.device)
+        masks         = torch.tensor(np.array([r[4]['mask'] for r in records]), dtype=torch.float32, device=self.device)
 
-        if 'advantage' not in records[0].log or 'return' not in records[0].log:
+        if 'advantage' not in records[0][4] or 'return' not in records[0][4]:
             return {}
 
-        advantages = torch.tensor([r.log['advantage'] for r in records], dtype=torch.float32, device=self.device)
-        returns    = torch.tensor([r.log['return']    for r in records], dtype=torch.float32, device=self.device)
+        advantages = torch.tensor([r[4]['advantage'] for r in records], dtype=torch.float32, device=self.device)
+        returns    = torch.tensor([r[4]['return']    for r in records], dtype=torch.float32, device=self.device)
 
         if len(advantages) > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -117,8 +118,8 @@ class PpoAgent(Agent):
                 batch_idx = indices[start:start + batch_size]
 
                 batch_state = {
-                    'probability':   probs[batch_idx],
-                    'table':         tables[batch_idx],
+                    'probabilities': probs[batch_idx],
+                    'tables':        tables[batch_idx],
                     'history':       histories[batch_idx],
                     'legal_actions': masks[batch_idx],
                 }
@@ -163,10 +164,12 @@ class PpoAgent(Agent):
         # probability is already a flat list of 128 floats (player * 32 + card)
         prob_tensor = torch.tensor(state['probability'], dtype=torch.float32, device=self.device).unsqueeze(0)  # [1, 128]
 
-        # Encode history (list of (player, card) tuples) → flat 128-float presence vector
+        # Encode history (list of (player, action) tuples) → flat 128-float presence vector
         hist_vec = [0.0] * 128
-        for player, card in state['history']:
-            hist_vec[player * 32 + card] = 1.0
+        for player, action in state['history']:
+            if ActionKit.is_play_card(action):
+                card = ActionKit.value(action)
+                hist_vec[player * 32 + card] = 1.0
         hist_tensor = torch.tensor(hist_vec, dtype=torch.float32, device=self.device).unsqueeze(0)  # [1, 128]
 
         # Pad table to length 4 with -1 (empty slots)
@@ -176,7 +179,7 @@ class PpoAgent(Agent):
         table_tensor = torch.tensor(table, dtype=torch.long, device=self.device).unsqueeze(0)  # [1, 4]
 
         return {
-            'probability': prob_tensor,
-            'history':     hist_tensor,
-            'table':       table_tensor,
+            'probabilities': prob_tensor,
+            'history':       hist_tensor,
+            'tables':        table_tensor,
         }

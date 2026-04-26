@@ -13,9 +13,9 @@ from src.kits import CardKit, TrumpKit, ListKit
 
 from .agent import PpoAgent
 from .network import PPONetwork
-from ..helper_agents.aggresive_player import AggressivePlayerAgent
-from ..helper_agents.soft_player import SoftPlayerAgent
-from ..helper_agents.random_chooser import RandomChooserAgent
+from ..helper_agents.aggresive_player import AggressivePlayer
+from ..helper_agents.soft_player import SoftPlayer
+from ..helper_agents.random_chooser import RandomChooser
 
 
 class Gym:
@@ -35,10 +35,10 @@ class Gym:
         self.rules = Rules()
 
         # Predefined opponents
-        self.soft_player       = SoftPlayerAgent()
+        self.soft_player       = SoftPlayer()
         self.agent_player      = PpoAgent(self.network, rng=self.rng)
-        self.randomer_player   = RandomChooserAgent()
-        self.aggressive_player = AggressivePlayerAgent()
+        self.randomer_player   = RandomChooser()
+        self.aggressive_player = AggressivePlayer()
 
         print(f"Gym initialized on device: {self.device}")
 
@@ -166,12 +166,12 @@ class Gym:
         if not play_records:
             return
 
-        rewards = [0.0] * 8
+        rewards = [0.0] * 9
         for r in play_records:
             player  = r[0]
             state   = r[1]
             accrued = r[3][1]
-            rd      = state['round']
+            rd      = min(state['round'], 7)
             if player in (1, 3):
                 rewards[rd] -= accrued / 100.0
             elif player == 2:
@@ -187,7 +187,7 @@ class Gym:
         values = [float(r[4]['value']) for r in player_play_records]
         values.append(0.0)
 
-        aligned_rewards = [rewards[r[1]['round']] for r in player_play_records]
+        aligned_rewards = [rewards[min(r[1]['round'], 7)] for r in player_play_records]
 
         gae = 0.0
         for i in reversed(range(len(player_play_records))):

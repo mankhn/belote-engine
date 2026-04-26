@@ -7,7 +7,7 @@ import argparse
 # Add the project root to the python path
 sys.path.append(os.getcwd())
 
-from src.play.cli.utils.main import transform_canonical
+from play.cli.utils.transformer import transform_canonical
 from src.kits import ListKit
 from src.play.core.simulator import Simulator
 from src.play.core.rules import Rules

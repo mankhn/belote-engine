@@ -1,8 +1,13 @@
 import random
+import sys
+import os
 import torch
 import argparse
 
-from src.play.cli.utils.main import transform_canonical
+# Add project root to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+
+from src.play.cli.utils.transformer import transform_canonical
 from src.kits import ListKit
 from src.play.core.simulator import Simulator
 from src.play.core.rules import Rules
@@ -45,7 +50,7 @@ def main():
 
     # Run simulation
     start_player = random.randint(0, 3)
-    scores, records = simulator.simulate((hands, trump, start_player))
+    scores, _ = simulator.simulate((hands, trump, start_player))
 
     print("\nGame Over!")
     print(f"Total Scores: {scores}")

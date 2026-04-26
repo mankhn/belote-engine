@@ -1,6 +1,11 @@
 from src.types import Card, Player
 from src.kits import HistoryKit, ProbabilityKit
 from ..types import Action, State
+from .action import ActionKit
+
+
+# Player index of "self" in the relative-to-current-player frame
+PLAYER_SELF = 0
 
 # State is personal from first person view.
 # holds:       list[Card]  — cards in hand
@@ -19,6 +24,21 @@ class StateKit:
 
     def __setattr__(self, key, val):
         self._s[key] = val
+
+    def __getitem__(self, key):
+        return self._s[key]
+
+    def __setitem__(self, key, val):
+        self._s[key] = val
+
+    def __contains__(self, key):
+        return key in self._s
+
+    def get(self, key, default=None):
+        return self._s.get(key, default)
+
+    def observe(self, player: Player, action: Action):
+        _observe(self._s, player, action)
 
     @staticmethod
     def make(holds: list[Card]) -> State:
@@ -40,19 +60,19 @@ class StateKit:
             'history':     HistoryKit.copy(state['history']),
         }
 
-    @staticmethod
-    def observe(state: State, player: Player, action: Action):
-        HistoryKit.record(state['history'], player, action)
-        
-        if Action.is_play_card(action):
-            card = Action.card(action)
-            state['table'].append(card)
-            
-            ProbabilityKit.update(state['probability'], player, card, 1.0)
 
-            if player == Player.SELF:
-                state['holds'].remove(card)
+def _observe(state: State, player: Player, action: Action):
+    HistoryKit.record(state['history'], player, action)
 
-            if len(state['table']) == 4:
-                state['round'] += 1
-                state['table'] = []
+    if ActionKit.is_play_card(action):
+        card = ActionKit.value(action)
+        state['table'].append(card)
+
+        ProbabilityKit.update(state['probability'], player, card, 1.0)
+
+        if player == PLAYER_SELF:
+            state['holds'].remove(card)
+
+        if len(state['table']) == 4:
+            state['round'] += 1
+            state['table'] = []

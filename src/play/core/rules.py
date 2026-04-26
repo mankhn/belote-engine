@@ -40,10 +40,10 @@ class Rules:
             return cards
         
         # Get lead suit (suit of the first card played in this trick)
-        table_lead_suit = table[0].suit
-        
+        table_lead_suit = CardKit.suit(table[0])
+
         # Check if player has cards of the lead suit
-        player_table_lead_suit_cards = [card for card in cards if card.suit == table_lead_suit]
+        player_table_lead_suit_cards = [c for c in cards if CardKit.suit(c) == table_lead_suit]
 
         # If player has cards of the lead suit, they MUST play one of them
         if player_table_lead_suit_cards:
@@ -57,7 +57,7 @@ class Rules:
         
         # If table winner is a trump, must play a trump higher than it
         if CardKit.is_trump(table_winner_card, trump):
-            player_winner_cards = [card for card in player_trump_cards if CardKit.beats(card, table_winner_card, trump)]
+            player_winner_cards = [c for c in player_trump_cards if CardKit.beats(c, trump, table_winner_card)]
             if player_winner_cards:
                 return player_winner_cards
         

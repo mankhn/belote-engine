@@ -170,9 +170,9 @@ class PPONetwork(nn.Module):
         Returns:
             dict with card_policy, bid_policy, announce_policy, value
         """
-        probabilities = state.probabilities  # [B, 128]
-        history = state.history              # [B, 128]
-        tables = state.tables                # [B, 4]
+        probabilities = state['probabilities']  # [B, 128]
+        history = state['history']               # [B, 128]
+        tables = state['tables']                 # [B, 4]
 
         B = probabilities.size(0)
         device = probabilities.device
@@ -225,8 +225,8 @@ class PPONetwork(nn.Module):
             values[mask] = case["value_head"](fused)
 
         # ============ ACTION MASKING ============
-        if hasattr(state, 'legal_actions') and state.legal_actions is not None:
-            card_logits = card_logits + state.legal_actions
+        if state.get('legal_actions') is not None:
+            card_logits = card_logits + state['legal_actions']
 
         # ============ OTHER POLICY HEADS (use hand encoding) ============
         return {
