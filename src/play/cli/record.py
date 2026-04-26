@@ -8,7 +8,7 @@ import argparse
 sys.path.append(os.getcwd())
 
 from play.cli.utils.transformer import transform_canonical
-from src.kits import ListKit
+from src.kits import ListKit, TrumpKit
 from src.play.core.simulator import Simulator
 from src.play.core.rules import Rules
 from src.play.helper_agents.human import Human
@@ -39,8 +39,7 @@ def main():
 
     print("")
     print("Starting Belote Game Recording...")
-    print(f"Trump is {trump}")
-    print("You will play for all 4 players.")
+    print(f"{TrumpKit.str(trump)} | You will play for all 4 players.")
 
     # Run simulation
     start_player = random.randint(0, 3)

@@ -8,7 +8,7 @@ import argparse
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
 
 from src.play.cli.utils.transformer import transform_canonical
-from src.kits import ListKit
+from src.kits import ListKit, TrumpKit
 from src.play.core.simulator import Simulator
 from src.play.core.rules import Rules
 from src.play.helper_agents.human import Human
@@ -45,8 +45,7 @@ def main():
 
     print("")
     print("Starting Belote Game Simulation...")
-    print(f"Trump is {trump}")
-    print("You are Player 0.")
+    print(f"{TrumpKit.str(trump)} | You are Player 0.")
 
     # Run simulation
     start_player = random.randint(0, 3)

@@ -45,8 +45,17 @@ class Rules:
         # Check if player has cards of the lead suit
         player_table_lead_suit_cards = [c for c in cards if CardKit.suit(c) == table_lead_suit]
 
-        # If player has cards of the lead suit, they MUST play one of them
+        # If player has cards of the lead suit, they MUST play one of them.
+        # Additionally, when the lead suit IS trump, they must overtrump if possible.
         if player_table_lead_suit_cards:
+            if CardKit.is_trump(table[0], trump):
+                table_winner_card, _ = ListKit.winner(table, trump)
+                player_winner_cards = [
+                    c for c in player_table_lead_suit_cards
+                    if CardKit.beats(c, trump, table_winner_card)
+                ]
+                if player_winner_cards:
+                    return player_winner_cards
             return player_table_lead_suit_cards
 
         # Player has no cards of the lead suit - must cut (play trump) if possible
