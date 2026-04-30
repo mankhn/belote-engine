@@ -74,6 +74,16 @@ class Gym:
                           f"Value: {metrics['value_loss']:.4f}, "
                           f"Entropy: {metrics['entropy']:.4f})")
                     print(f"  Reward vs Loss: Avg Reward={scores:.2f}, Total Loss={metrics['total_loss']:.4f}")
+                    
+                    # Display per-network metrics
+                    print("\n  Per-Network Metrics:")
+                    for net_id in range(4):
+                        if f'network_{net_id}_policy_loss' in metrics:
+                            p_loss = metrics[f'network_{net_id}_policy_loss']
+                            v_loss = metrics[f'network_{net_id}_value_loss']
+                            samples = metrics[f'network_{net_id}_samples']
+                            print(f"    Network {net_id} (table has {net_id} cards): "
+                                  f"Policy={p_loss:.4f}, Value={v_loss:.4f}, Samples={samples}")
 
             # Save model for next phase
             model_path = os.path.join(self.model_dir, "model.pt")

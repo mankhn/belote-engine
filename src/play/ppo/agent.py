@@ -14,7 +14,15 @@ class PpoAgent(Agent):
         super().__init__()
         self.network = network
         self.device = next(network.parameters()).device
-        self.optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-5)
+        
+        # Create separate optimizers for each network + shared embedding
+        self.optimizers = {
+            0: torch.optim.Adam(network.get_network_parameters(0), lr=1e-3, weight_decay=1e-5),
+            1: torch.optim.Adam(network.get_network_parameters(1), lr=1e-3, weight_decay=1e-5),
+            2: torch.optim.Adam(network.get_network_parameters(2), lr=1e-3, weight_decay=1e-5),
+            3: torch.optim.Adam(network.get_network_parameters(3), lr=1e-3, weight_decay=1e-5),
+            'shared': torch.optim.Adam(network.get_shared_embedding_parameters(), lr=5e-4, weight_decay=1e-5),
+        }
         self.rng = rng if rng is not None else np.random.default_rng(42)
 
     def choose_action(self, state: State, actions: List[Action]) -> Tuple[Action, Optional[Log]]:
@@ -75,7 +83,6 @@ class PpoAgent(Agent):
 
         # Hyperparameters
         clip_param     = 0.2
-        value_loss_coef = 0.5
         entropy_coef   = 0.01
         max_grad_norm  = 0.5
         ppo_epochs     = 4
@@ -105,13 +112,51 @@ class PpoAgent(Agent):
         advantages = torch.tensor([r[4]['advantage'] for r in records], dtype=torch.float32, device=self.device)
         returns    = torch.tensor([r[4]['return']    for r in records], dtype=torch.float32, device=self.device)
 
+        # Normalize advantages
         if len(advantages) > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        
+        # Normalize returns to help value network learn (remember stats for denormalization if needed)
+        returns_mean = returns.mean()
+        returns_std = returns.std() + 1e-8
+        returns_normalized = (returns - returns_mean) / returns_std
 
+        # Get table counts for each record to know which network was used
+        batch_state_all = {
+            'probabilities': probs,
+            'tables':        tables,
+            'history':       histories,
+            'legal_actions': masks,
+        }
+        with torch.no_grad():
+            outputs_all = self.network(batch_state_all)
+            table_counts = outputs_all['table_counts']  # [N] - which network (0-3) for each sample
+
+        # Diagnostic: Check value prediction vs target distribution
+        with torch.no_grad():
+            print(f"  Value predictions: mean={outputs_all['value'].mean():.2f}, std={outputs_all['value'].std():.2f}")
+            print(f"  Value targets (original): mean={returns.mean():.2f}, std={returns.std():.2f}")
+            print(f"  Value targets (normalized): mean={returns_normalized.mean():.2f}, std={returns_normalized.std():.2f}")
+
+        # Adaptive value loss coefficient based on magnitude
+        avg_value_loss_initial = nn.functional.mse_loss(outputs_all['value'].squeeze(-1), returns_normalized).item()
+        if avg_value_loss_initial > 3.0:
+            value_loss_coef = 2.0  # High loss - prioritize value learning
+        elif avg_value_loss_initial > 1.0:
+            value_loss_coef = 1.0  # Medium loss - balanced
+        else:
+            value_loss_coef = 0.5  # Low loss - fine-tuning
+        
+        print(f"  Using value_loss_coef={value_loss_coef:.1f} (initial value loss={avg_value_loss_initial:.2f})")
+
+        # Initialize per-network metrics
+        network_metrics = {i: {'policy_loss': [], 'value_loss': [], 'entropy': [], 'samples': 0} 
+                          for i in range(4)}
+        
         total_policy_loss = total_value_loss = total_entropy = total_loss = num_updates = 0
         indices = np.arange(len(records))
 
-        for _ in range(ppo_epochs):
+        for epoch in range(ppo_epochs):
             self.rng.shuffle(indices)
 
             for start in range(0, len(records), batch_size):
@@ -130,19 +175,43 @@ class PpoAgent(Agent):
                 new_log_probs = dist.log_prob(actions[batch_idx])
                 entropy      = dist.entropy().mean()
                 new_values   = outputs['value'].squeeze(-1)
+                batch_table_counts = outputs['table_counts']
 
                 ratio  = torch.exp(new_log_probs - old_log_probs[batch_idx])
                 adv    = advantages[batch_idx]
                 surr1  = ratio * adv
                 surr2  = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * adv
                 policy_loss = -torch.min(surr1, surr2).mean()
-                value_loss  = nn.functional.mse_loss(new_values, returns[batch_idx])
+                value_loss  = nn.functional.mse_loss(new_values, returns_normalized[batch_idx])
                 loss        = policy_loss + value_loss_coef * value_loss - entropy_coef * entropy
 
-                self.optimizer.zero_grad()
+                # Zero gradients for all optimizers
+                for opt in self.optimizers.values():
+                    opt.zero_grad()
+                
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.network.parameters(), max_grad_norm)
-                self.optimizer.step()
+                
+                # Clip gradients and step only the optimizers for networks used in this batch
+                networks_used = set()
+                for net_id in range(4):
+                    mask = (batch_table_counts == net_id)
+                    if mask.any():
+                        networks_used.add(net_id)
+                        # Track per-network metrics (using normalized returns)
+                        net_policy_loss = -torch.min(surr1[mask], surr2[mask]).mean()
+                        net_value_loss = nn.functional.mse_loss(new_values[mask], returns_normalized[batch_idx][mask])
+                        network_metrics[net_id]['policy_loss'].append(net_policy_loss.item())
+                        network_metrics[net_id]['value_loss'].append(net_value_loss.item())
+                        network_metrics[net_id]['samples'] += mask.sum().item()
+                
+                # Clip gradients and step optimizers
+                for net_id in networks_used:
+                    nn.utils.clip_grad_norm_(self.network.get_network_parameters(net_id), max_grad_norm)
+                    self.optimizers[net_id].step()
+                
+                # Always update shared embedding
+                nn.utils.clip_grad_norm_(self.network.get_shared_embedding_parameters(), max_grad_norm)
+                self.optimizers['shared'].step()
 
                 total_policy_loss += policy_loss.item()
                 total_value_loss  += value_loss.item()
@@ -150,12 +219,22 @@ class PpoAgent(Agent):
                 total_loss        += loss.item()
                 num_updates       += 1
 
-        return {
+        # Compile metrics
+        metrics = {
             'policy_loss': total_policy_loss / num_updates,
             'value_loss':  total_value_loss  / num_updates,
             'entropy':     total_entropy     / num_updates,
             'total_loss':  total_loss        / num_updates,
         }
+        
+        # Add per-network metrics
+        for net_id in range(4):
+            if network_metrics[net_id]['policy_loss']:
+                metrics[f'network_{net_id}_policy_loss'] = np.mean(network_metrics[net_id]['policy_loss'])
+                metrics[f'network_{net_id}_value_loss'] = np.mean(network_metrics[net_id]['value_loss'])
+                metrics[f'network_{net_id}_samples'] = network_metrics[net_id]['samples']
+        
+        return metrics
 
     # --- Helper Methods ---
 
