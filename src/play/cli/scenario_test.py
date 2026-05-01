@@ -1,27 +1,23 @@
 """
 Belote Agent Scenario Testing
 
-This script tests a Belote agent against specific, well-known game scenarios
-to measure how accurately it makes strategic decisions.
-
-Each test case is human-readable and tests a specific game strategy.
+Tests a Belote agent against specific, well-known game scenarios.
+Each scenario directly specifies probability, history, table and hand
+rather than requiring a full 4-player deck setup.
 """
 
 import os
 import sys
 import torch
 import argparse
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
-# Add the project root to the python path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
 sys.path.append(PROJECT_ROOT)
 
 from src.kits.card import CardKit
 from src.kits.trump import TrumpKit
-from src.kits.probability import ProbabilityKit
-from src.kits.history import HistoryKit
-from src.types import Card, Trump, Player
+from src.types import Card, Trump
 from src.play.core.rules import Rules
 from src.play.kits.state import StateKit
 from src.play.kits.action import ActionKit
@@ -29,478 +25,266 @@ from src.play.ppo.network import PPONetwork
 from src.play.ppo.agent import PpoAgent
 
 
-class ScenarioTest:
-    """Represents a single test scenario"""
-    
-    def __init__(self, name: str, description: str,
-                 deck: List[List[Card]], trump: Trump,
-                 played_actions: List[Tuple[Player, any]],
-                 expected_cards: List[Card], avoid_cards: List[Card] = None):
-        """
-        Args:
-            name: Short name for the test
-            description: Human-readable description of the strategy being tested
-            deck: 4 hands (lists of cards), one for each player [player0, player1, player2, player3]
-            trump: Trump suit
-            played_actions: List of (player, action) tuples that have already been played
-            expected_cards: Cards the agent (player 0) should play (any of these is acceptable)
-            avoid_cards: Cards the agent should NOT play (optional)
-        """
-        self.name = name
-        self.description = description
-        self.deck = deck
-        self.trump = trump
-        self.played_actions = played_actions
-        self.expected_cards = expected_cards
-        self.avoid_cards = avoid_cards or []
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+RANK_MAP  = {' 7': 0, ' 8': 1, ' 9': 2, '10': 3, ' J': 4, ' Q': 5, ' K': 6, ' A': 7}
+SUIT_MAP  = {'♠': 0, '♥': 1, '♦': 2, '♣': 3}
+SUIT_NAME = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}
+TRUMP_MAP = {'♠': 0, '♥': 1, '♦': 2, '♣': 3, 'No-Trump': 4, 'All-Trump': 5}
 
 
-def make_card(rank_str: str, suit_str: str) -> Card:
-    """Create a card from rank and suit strings"""
-    rank_map = {' 7': 0, ' 8': 1, ' 9': 2, '10': 3, ' J': 4, ' Q': 5, ' K': 6, ' A': 7}
-    suit_map = {'♠': 0, '♥': 1, '♦': 2, '♣': 3}
-    return CardKit.make(suit_map[suit_str], rank_map[rank_str])
+def c(card_str: str) -> Card:
+    """Parse a card string like ' 7♥' or '10♠' into a card int."""
+    suit_char = card_str[-1]
+    rank_str  = card_str[:-1]
+    return CardKit.make(SUIT_MAP[suit_char], RANK_MAP[rank_str])
 
 
-def card_name(card: Card) -> str:
-    """Get human-readable name for a card"""
+def cn(card: Card) -> str:
     return CardKit.str(card)
 
 
+def build_state(
+    hand:  List[str],             # player 0's current hand
+    trump: str,                   # '♠' '♥' '♦' '♣' 'No-Trump' 'All-Trump'
+    plays: List[Tuple[int, str]], # [(player, card_str), ...] in chronological order
+) -> StateKit:
+    """
+    Build a StateKit by replaying plays through StateKit.observe().
+    Probability, history and table are derived automatically.
+    Only include plays by players 1-3; player 0's past plays are implicit
+    (their cards are simply absent from hand).
+    """
+    hand_cards = [c(s) for s in hand]
+    state = StateKit(StateKit.make(hand_cards))
+    state['trump'] = TRUMP_MAP[trump]
+    for player, card_str in plays:
+        state.observe(player, ActionKit.play_card(c(card_str)))
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Scenario definition
+# ---------------------------------------------------------------------------
+
+class ScenarioTest:
+    def __init__(
+        self,
+        name:           str,
+        description:    str,
+        hand:           List[str],              # player 0's current hand
+        trump:          str,                    # '♠' '♥' '♦' '♣' 'No-Trump' 'All-Trump'
+        plays:          List[Tuple[int, str]],  # [(player, card_str), ...] in order
+        expected_cards: List[str],              # acceptable plays
+        avoid_cards:    Optional[List[str]] = None,
+    ):
+        self.name           = name
+        self.description    = description
+        self.hand           = hand
+        self.trump          = trump
+        self.plays          = plays
+        self.expected_cards = [c(s) for s in expected_cards]
+        self.avoid_cards    = [c(s) for s in (avoid_cards or [])]
+
+
+# ---------------------------------------------------------------------------
+# Scenario definitions
+# ---------------------------------------------------------------------------
+
 def create_test_scenarios() -> List[ScenarioTest]:
-    """Create all test scenarios"""
     scenarios = []
-    
-    # Scenario 1: Don't waste Ace on opponent's low card when you have lower cards
+
+    # Scenario 1: Don't waste Ace on low card — opponent leads 8♥, you have A♥ and 7♥; should play 7♥ to save A♥ for later
     scenarios.append(ScenarioTest(
         name="dont_waste_ace_on_low",
-        description="When opponent plays a low card (8♥), don't waste Ace if you have lower cards",
-        deck=[
-            # Player 0 (agent being tested)
-            [
-                make_card(' A', '♥'),  # Ace of hearts
-                make_card('10', '♥'),  # 10 of hearts
-                make_card(' 7', '♥'),  # 7 of hearts
-                make_card(' 9', '♠'),
-                make_card(' K', '♣'),
-                make_card(' Q', '♠'),
-                make_card(' 8', '♦'),
-                make_card(' 7', '♦'),
-            ],
-            # Player 1 (opponent)
-            [
-                make_card(' 8', '♥'),
-                make_card(' K', '♥'),
-                make_card(' J', '♦'),
-                make_card('10', '♦'),
-                make_card(' 9', '♦'),
-                make_card(' A', '♠'),
-                make_card(' 7', '♣'),
-                make_card(' 8', '♣'),
-            ],
-            # Player 2 (partner)
-            [
-                make_card(' 9', '♥'),
-                make_card(' Q', '♥'),
-                make_card(' J', '♥'),
-                make_card(' A', '♦'),
-                make_card(' K', '♦'),
-                make_card('10', '♠'),
-                make_card(' Q', '♣'),
-                make_card('10', '♣'),
-            ],
-            # Player 3 (opponent)
-            [
-                make_card(' J', '♠'),
-                make_card(' 8', '♠'),
-                make_card(' 7', '♠'),
-                make_card(' K', '♠'),
-                make_card(' Q', '♦'),
-                make_card(' 9', '♣'),
-                make_card(' A', '♣'),
-                make_card(' J', '♣'),
-            ],
-        ],
-        trump=0,  # Spades trump
-        played_actions=[
-            (1, ActionKit.play_card(make_card(' 8', '♥'))),  # Player 1 plays 8♥
-        ],
-        expected_cards=[
-            make_card(' 7', '♥'),  # Should play 7 of hearts
-        ],
-        avoid_cards=[
-            make_card(' A', '♥'),  # Should NOT play Ace
-            make_card('10', '♥'),  # Should NOT play 10
-        ]
+        description="Opponent leads 8♥ — don't waste A♥ when you have 7♥ to cover",
+        hand=[' A♥', '10♥', ' 7♥', ' 9♠', ' K♣', ' Q♠', ' 8♦', ' 7♦'],
+        trump='♠',
+        plays=[(1, ' 8♥')],
+        expected_cards=[' A♥', '10♥'],
+        avoid_cards=[' 7♥'],
     ))
-    
-    # Scenario 2: Don't waste 10 when you can play lower
+
+    # Scenario 2: Don't waste 10♦ when King/Queen can cover opponent's 9♦
     scenarios.append(ScenarioTest(
         name="dont_waste_ten",
-        description="When opponent plays 9♦, don't waste 10 if you have King (which is lower value)",
-        deck=[
-            # Player 0
-            [
-                make_card('10', '♦'),
-                make_card(' K', '♦'),
-                make_card(' Q', '♦'),
-                make_card(' J', '♠'),
-                make_card(' 8', '♣'),
-                make_card(' 7', '♥'),
-                make_card(' 8', '♥'),
-                make_card(' 9', '♥'),
-            ],
-            # Player 1
-            [
-                make_card(' 9', '♦'),
-                make_card(' 7', '♦'),
-                make_card(' A', '♠'),
-                make_card(' K', '♠'),
-                make_card('10', '♣'),
-                make_card(' A', '♥'),
-                make_card('10', '♥'),
-                make_card(' Q', '♥'),
-            ],
-            # Player 2
-            [
-                make_card(' A', '♦'),
-                make_card(' J', '♦'),
-                make_card(' 9', '♠'),
-                make_card(' 8', '♠'),
-                make_card(' 7', '♠'),
-                make_card(' Q', '♣'),
-                make_card(' 9', '♣'),
-                make_card(' J', '♥'),
-            ],
-            # Player 3
-            [
-                make_card(' 8', '♦'),
-                make_card('10', '♠'),
-                make_card(' Q', '♠'),
-                make_card(' A', '♣'),
-                make_card(' K', '♣'),
-                make_card(' J', '♣'),
-                make_card(' 7', '♣'),
-                make_card(' K', '♥'),
-            ],
-        ],
-        trump=0,  # Spades trump
-        played_actions=[
-            (1, ActionKit.play_card(make_card(' 9', '♦'))),
-        ],
-        expected_cards=[
-            make_card(' K', '♦'),  # King is lower value than 10
-            make_card(' Q', '♦'),  # Queen is also lower
-        ],
-        avoid_cards=[
-            make_card('10', '♦'),  # Don't waste the 10
-        ]
+        description="Opponent leads 9♦ — don't waste 10♦ when K♦ or Q♦ can cover",
+        hand=['10♦', ' K♦', ' Q♦', ' J♠', ' 8♣', ' 7♥', ' 8♥', ' 9♥'],
+        trump='♠',
+        plays=[(1, ' 9♦')],
+        expected_cards=[' K♦', ' Q♦'],
+        avoid_cards=['10♦'],
     ))
-    
-    # Scenario 3: Lead with trump Jack when starting
+
+    # Scenario 3: Lead with trump Jack when you have it — it's the highest trump and can win the trick immediately
     scenarios.append(ScenarioTest(
         name="lead_with_trump_jack",
-        description="When you start and have trump Jack (highest trump), lead with it",
-        deck=[
-            # Player 0
-            [
-                make_card(' J', '♥'),  # Jack of hearts (trump)
-                make_card(' 9', '♥'),  # 9 of hearts (trump)
-                make_card(' A', '♠'),
-                make_card('10', '♣'),
-                make_card(' K', '♦'),
-                make_card(' Q', '♦'),
-                make_card(' 7', '♠'),
-                make_card(' 8', '♠'),
-            ],
-            # Player 1
-            [
-                make_card(' A', '♥'),
-                make_card(' K', '♥'),
-                make_card(' Q', '♥'),
-                make_card(' K', '♠'),
-                make_card(' 9', '♠'),
-                make_card(' A', '♣'),
-                make_card(' K', '♣'),
-                make_card(' A', '♦'),
-            ],
-            # Player 2
-            [
-                make_card('10', '♥'),
-                make_card(' 8', '♥'),
-                make_card(' 7', '♥'),
-                make_card(' J', '♠'),
-                make_card(' Q', '♠'),
-                make_card(' Q', '♣'),
-                make_card(' J', '♣'),
-                make_card(' J', '♦'),
-            ],
-            # Player 3
-            [
-                make_card('10', '♠'),
-                make_card(' 9', '♣'),
-                make_card(' 8', '♣'),
-                make_card(' 7', '♣'),
-                make_card('10', '♦'),
-                make_card(' 9', '♦'),
-                make_card(' 8', '♦'),
-                make_card(' 7', '♦'),
-            ],
-        ],
-        trump=1,  # Hearts trump
-        played_actions=[],  # No actions yet, player 0 starts
-        expected_cards=[
-            make_card(' J', '♥'),  # Should lead with trump Jack
-        ],
-        avoid_cards=[]
+        description="Lead with trump Jack — it's the highest trump and can win the trick immediately",
+        hand=[' J♥', ' 9♥', ' A♠', '10♣', ' K♦', ' Q♦', ' 7♠', ' 8♠'],
+        trump='♥',
+        plays=[],
+        expected_cards=[' J♥', ' 9♥', ' A♠'],
+        avoid_cards=['10♣', ' K♦', ' Q♦', ' 7♠', ' 8♠'],
     ))
-    
-    # Scenario 4: Cut with trump when can't follow suit
+
+    # Scenario 4: Cut with trump when you have no lead suit
     scenarios.append(ScenarioTest(
         name="cut_with_trump",
-        description="When you can't follow suit, cut with a trump card",
-        deck=[
-            # Player 0
-            [
-                make_card(' J', '♠'),  # Jack of spades (trump)
-                make_card(' 9', '♠'),  # 9 of spades (trump)
-                make_card(' 7', '♥'),
-                make_card(' 8', '♦'),
-                make_card(' 9', '♦'),
-                make_card('10', '♦'),
-                make_card(' J', '♦'),
-                make_card(' Q', '♦'),
-            ],
-            # Player 1
-            [
-                make_card(' A', '♣'),
-                make_card(' K', '♣'),
-                make_card('10', '♣'),
-                make_card(' 9', '♣'),
-                make_card(' A', '♥'),
-                make_card('10', '♥'),
-                make_card(' K', '♥'),
-                make_card(' Q', '♥'),
-            ],
-            # Player 2
-            [
-                make_card(' 8', '♣'),
-                make_card(' 7', '♣'),
-                make_card(' Q', '♣'),
-                make_card(' J', '♣'),
-                make_card(' J', '♥'),
-                make_card(' 9', '♥'),
-                make_card(' 8', '♥'),
-                make_card(' A', '♦'),
-            ],
-            # Player 3
-            [
-                make_card(' A', '♠'),
-                make_card(' K', '♠'),
-                make_card('10', '♠'),
-                make_card(' Q', '♠'),
-                make_card(' 8', '♠'),
-                make_card(' 7', '♠'),
-                make_card(' K', '♦'),
-                make_card(' 7', '♦'),
-            ],
-        ],
-        trump=0,  # Spades trump
-        played_actions=[
-            (1, ActionKit.play_card(make_card(' A', '♣'))),
-        ],
-        expected_cards=[
-            make_card(' J', '♠'),  # Should cut with trump
-            make_card(' 9', '♠'),
-        ],
-        avoid_cards=[
-            make_card(' 7', '♥'),  # Don't throw away non-trump
-            make_card(' 8', '♦'),
-        ]
+        description="Opponent leads 9♦, you have no diamonds but have trump 9♠ — cut with 9♠ to try to win the trick",
+        hand=[' 9♠', ' 7♠', ' 7♥', ' 8♦', ' 9♦', '10♦', ' J♦', ' Q♦'],
+        trump='♠',
+        plays=[(1, ' A♣')],
+        expected_cards=[' 9♠'],
+        avoid_cards=[' 7♠'],
     ))
-    
-    # Scenario 5: Overtrump when opponent cuts
+
+    # Scenario 5: Overtrump when opponent cuts with trump — opponent (player 2) cuts with 9♠, you have J♠ which can overtrump and win the trick immediately
     scenarios.append(ScenarioTest(
         name="overtrump_opponent",
-        description="When opponent cuts with 9♠, overtrump with Jack if you have it",
-        deck=[
-            # Player 0
-            [
-                make_card(' J', '♠'),  # Jack of spades (trump) - highest
-                make_card(' A', '♥'),
-                make_card(' K', '♥'),
-                make_card(' Q', '♥'),
-                make_card('10', '♥'),
-                make_card(' 9', '♥'),
-                make_card(' 8', '♥'),
-                make_card(' 7', '♥'),
-            ],
-            # Player 1
-            [
-                make_card(' A', '♣'),
-                make_card(' K', '♣'),
-                make_card('10', '♣'),
-                make_card(' Q', '♣'),
-                make_card(' J', '♣'),
-                make_card(' 9', '♣'),
-                make_card(' 8', '♣'),
-                make_card(' 7', '♣'),
-            ],
-            # Player 2
-            [
-                make_card(' 9', '♠'),
-                make_card(' A', '♠'),
-                make_card(' K', '♠'),
-                make_card('10', '♠'),
-                make_card(' Q', '♠'),
-                make_card(' 8', '♠'),
-                make_card(' 7', '♠'),
-                make_card(' J', '♥'),
-            ],
-            # Player 3
-            [
-                make_card(' A', '♦'),
-                make_card(' K', '♦'),
-                make_card('10', '♦'),
-                make_card(' Q', '♦'),
-                make_card(' J', '♦'),
-                make_card(' 9', '♦'),
-                make_card(' 8', '♦'),
-                make_card(' 7', '♦'),
-            ],
-        ],
-        trump=0,  # Spades trump
-        played_actions=[
-            (1, ActionKit.play_card(make_card(' A', '♣'))),
-            (2, ActionKit.play_card(make_card(' 9', '♠'))),  # Partner cuts with 9
-        ],
-        expected_cards=[
-            make_card(' J', '♠'),  # Must overtrump
-        ],
-        avoid_cards=[]
+        description="Opponent cuts with 9♠, you have J♠ which can overtrump and win the trick immediately",
+        hand=[' A♥', ' K♥', ' Q♥', '10♥', ' 9♥', ' 8♥', ' 7♥', ' J♠'],
+        trump='♠',
+        plays=[(1, ' A♣'), (2, ' 9♠')],
+        expected_cards=[' A♥'],
+        avoid_cards=[],
     ))
-    
+
+    # Scenario 6 (Round 4): Overtrump with trump when opponent leads trump — opponent (player 1) leads 9♥ (trump), you have J♥ which can overtrump and win the trick immediately; must overtrump due to rules
+    # P0 starting hand: [A♠, 10♠, 7♦, K♣, Q♣, J♣, 9♣, 8♥]
+    # P0 plays K♣, Q♣, J♣, 9♣ in rounds 0-3 → remaining [A♠, 10♠, 7♦, 8♥]
+    # Current trick: P1 leads 9♥ (trump); P0 has 8♥ (trump) and must overtrump with J♥ (not in hand, but rules force overtrump if possible)
+    # Rules force P0 to overtrump: must play 8♥ (trump) to try to win the trick, even though it's not guaranteed to win against 9♥; if P0 had J♥, it would be the better overtrump choice
+    scenarios.append(ScenarioTest(
+        name="overtrump_trump_lead_round4",
+        description="Round 4 — opponent leads 9♥ (trump), must overtrump with 8♥ (trump) to try to win the trick",
+        hand=[' 9♥',  '10♥', ' A♠', ' 7♦', ' K♣', ' Q♣', ' J♣', ' 9♣'],
+        trump='♥',
+        plays=[
+            (0, ' K♣'), (1, ' 7♣'), (2, ' 8♣'), (3, '10♣'),  # round 0
+            (0, ' Q♣'), (1, ' A♣'), (2, ' 7♠'), (3, ' 8♠'),  # round 1
+            (0, ' J♣'), (1, ' K♠'), (2, ' Q♠'), (3, ' J♠'),  # round 2
+            (0, ' 9♣'), (1, ' 9♠'), (2, ' K♦'), (3, ' Q♦'),  # round 3
+            (1, ' 8♥'), (2, ' J♥'), (3, ' A♦'),               # round 4 in progress
+        ],
+        expected_cards=['10♥'],
+        avoid_cards=[' 9♥'],
+    ))
+
+    # Scenario 7 (Round 5): Opponent winning, no trump or lead suit — dump lowest card
+    # P0 starting hand: [A♠, 10♠, 7♥, K♣, Q♣, J♣, 9♣, 8♠]
+    # P0 plays K♣, Q♣, J♣, 9♣, 8♠ in rounds 0-4 → remaining [A♠, 10♠, 7♥]
+    # Trump=♣; P0 has no clubs left and no diamonds → can play anything
+    # Opponent (P1) winning with A♦ — dump 7♥ (0 pts) not A♠ (11 pts) or 10♠ (10 pts)
+    scenarios.append(ScenarioTest(
+        name="dump_low_opponent_winning_round5",
+        description="Round 5 — opponent wins with A♦, no follow suit or trump, dump 7♥",
+        hand=[' A♠', '10♠', ' 7♥', ' K♣', ' Q♣', ' J♣', ' 9♣', ' 8♠'],
+        trump='♣',
+        plays=[
+            (0, ' K♣'), (1, ' 7♣'), (2, ' 8♣'), (3, '10♣'),  # round 0
+            (0, ' Q♣'), (1, ' 7♠'), (2, ' K♠'), (3, ' Q♠'),  # round 1
+            (0, ' J♣'), (1, ' J♠'), (2, ' K♦'), (3, ' Q♦'),  # round 2
+            (1, ' 7♦'), (2, ' 8♦'), (3, ' J♦'), (0, ' 9♣'),  # round 3
+            (1, ' 9♠'), (2, '10♦'), (3, ' 9♦'), (0, ' 8♠'),  # round 4
+            (1, ' A♦'), (2, ' Q♥'), (3, ' J♥'),               # round 5 in progress
+        ],
+        expected_cards=[' 7♥'],
+        avoid_cards=[' A♠', '10♠'],
+    ))
+
     return scenarios
 
 
-def run_scenario_test(agent: PpoAgent, rules: Rules, scenario: ScenarioTest) -> Tuple[bool, Card, str]:
-    """
-    Run a single scenario test
-    
-    Returns:
-        (passed, chosen_card, message)
-    """
-    # Create initial state for player 0 (the agent we're testing)
-    player0_hand = scenario.deck[0]
-    raw_state = StateKit.make(player0_hand)
-    raw_state['trump'] = scenario.trump
-    state = StateKit(raw_state)
-    
-    # Replay all the played actions - state will observe and update itself
-    for player, action in scenario.played_actions:
-        # Convert player perspective: in state, player 0 is always "self"
-        # So we need to adjust player numbers relative to player 0
-        relative_player = player  # Already relative to player 0
-        state.observe(relative_player, action)
-    
-    # Get valid actions from rules
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+def run_scenario(agent: PpoAgent, rules: Rules, scenario: ScenarioTest):
+    """Run one scenario. Returns (passed, chosen_card, message)."""
+    state = build_state(
+        hand=scenario.hand,
+        trump=scenario.trump,
+        plays=scenario.plays,
+    )
     valid_actions = rules.actions(state)
-    
-    # Agent chooses action
+
     chosen_action, _ = agent.choose_action(state, valid_actions)
-    
+
     if not ActionKit.is_play_card(chosen_action):
         return False, None, "Agent didn't play a card"
-    
-    chosen_card = ActionKit.value(chosen_action)
-    
-    # Check if chosen card is expected
-    if scenario.expected_cards and chosen_card not in scenario.expected_cards:
-        expected_names = [card_name(c) for c in scenario.expected_cards]
-        message = f"Expected one of {expected_names}, got {card_name(chosen_card)}"
-        passed = False
-    elif chosen_card in scenario.avoid_cards:
-        avoid_names = [card_name(c) for c in scenario.avoid_cards]
-        message = f"Should NOT play {card_name(chosen_card)} (avoid: {avoid_names})"
-        passed = False
-    else:
-        message = f"Correctly played {card_name(chosen_card)}"
-        passed = True
-    
-    return passed, chosen_card, message
 
+    chosen_card = ActionKit.value(chosen_action)
+
+    if scenario.expected_cards and chosen_card not in scenario.expected_cards:
+        expected_names = [cn(c) for c in scenario.expected_cards]
+        return False, chosen_card, f"Expected one of {expected_names}, got {cn(chosen_card)}"
+
+    if chosen_card in scenario.avoid_cards:
+        avoid_names = [cn(c) for c in scenario.avoid_cards]
+        return False, chosen_card, f"Should NOT play {cn(chosen_card)} (avoid: {avoid_names})"
+
+    return True, chosen_card, f"Correctly played {cn(chosen_card)}"
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Test Belote Agent on Specific Scenarios")
-    parser.add_argument("--model", type=str, default="models/model.pt", 
-                       help="Path to the trained model file")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                       help="Show detailed output for each test")
+    parser.add_argument("--model", type=str, default="models/model.pt")
+    parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
-    
-    # Load model
+
     model_path = args.model
     if not os.path.isabs(model_path):
         model_path = os.path.join(PROJECT_ROOT, model_path)
-    
+
     if not os.path.exists(model_path):
-        print(f"Error: {model_path} not found. Please train a model first.")
+        print(f"Error: {model_path} not found. Train a model first.")
         return
-    
+
     print(f"Loading model from {model_path}...")
     network = PPONetwork()
     network.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     network.eval()
-    
+
     agent = PpoAgent(network)
     rules = Rules()
-    
-    # Create and run scenarios
     scenarios = create_test_scenarios()
-    
+
     print(f"\n{'='*80}")
     print(f"Running {len(scenarios)} Scenario Tests")
     print(f"{'='*80}\n")
-    
-    passed_tests = 0
-    failed_tests = 0
-    
+
+    passed_tests = failed_tests = 0
+
     for i, scenario in enumerate(scenarios, 1):
         print(f"Test {i}: {scenario.name}")
         print(f"  Description: {scenario.description}")
-        
+
         if args.verbose:
-            print(f"  Player 0 hand: {[card_name(c) for c in scenario.deck[0]]}")
-            print(f"  Trump: {TrumpKit.str(scenario.trump)}")
-            if scenario.played_actions:
-                print(f"  Played actions:")
-                for player, action in scenario.played_actions:
-                    if ActionKit.is_play_card(action):
-                        card = ActionKit.value(action)
-                        print(f"    Player {player}: {card_name(card)}")
-        
-        passed, chosen_card, message = run_scenario_test(agent, rules, scenario)
-        
+            print(f"  Hand:  {scenario.hand}")
+            print(f"  Trump: {scenario.trump}")
+            print(f"  Plays: {scenario.plays}")
+
+        passed, chosen_card, message = run_scenario(agent, rules, scenario)
+
         if passed:
             passed_tests += 1
-            status = "✓ PASS"
+            print(f"  Result: ✓ PASS - {message}")
         else:
             failed_tests += 1
-            status = "✗ FAIL"
-        
-        print(f"  Result: {status} - {message}")
+            print(f"  Result: ✗ FAIL - {message}")
         print()
-    
-    # Summary
+
     print(f"{'='*80}")
-    print(f"Summary:")
-    print(f"  Total Tests: {len(scenarios)}")
-    print(f"  Passed: {passed_tests}")
-    print(f"  Failed: {failed_tests}")
-    print(f"  Accuracy: {(passed_tests / len(scenarios) * 100):.1f}%")
+    print(f"Passed: {passed_tests}/{len(scenarios)}  "
+          f"({passed_tests / len(scenarios) * 100:.1f}%)")
     print(f"{'='*80}")
-    
-    # Return non-zero exit code if any tests failed
+
     sys.exit(0 if failed_tests == 0 else 1)
 
 
