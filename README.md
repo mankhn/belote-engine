@@ -20,23 +20,11 @@ pip install -r requirements.txt
 
 ## Test
 
-Run all tests
+Run Tests
 
 ```bash
-export PYTHONPATH=$PYTHONPATH:$(pwd)/src:$(pwd)/src && ./bin/python -m pytest src/
+python -m pytest src/
 ``` 
-
-Test individual file
-
-```bash
-export PYTHONPATH=$PYTHONPATH:$(pwd)/src:$(pwd)/src/models && ./bin/python -m pytest src/models/card_test.py
-```
-
-## Universal Models
-The system uses a set of constant, universal models (**Card**, **Deck**, **Trump**, **Set**, **Probability**) to represent the fundamental entities of the game. These models encapsulate the static rules and properties of Belote.
-
-## Phase 1: Play
-The architecture separates the **Game Logic (Core)** from the **Decision Making (Agents)**.
 
 ### Core Logic
 The simulation follows a strict cycle:
@@ -45,8 +33,6 @@ The simulation follows a strict cycle:
 *   **Agent**: Selects an action from the valid options (`Agent.choose_action([Action]) -> Action`).
 *   **State**: Updates itself based on actions (`State.observe(player, Action)`).
 *   **Simulator**: Orchestrates the game loop using Rules and Agents to produce a final outcome (`Simulator(Rules, Agents)->simulate(States) -> Result`).
-
-The **Result** serves as a complete record for **replication** or **training**.
 
 ### Implementation Strategy
 *   **Core**: Contains the immutable logic of the game (Rules, State definitions, Simulator).

@@ -8,6 +8,7 @@ ven
 lib
 share
 *.pth
+*.pt
 .env
 .idea
 .DS_Store
