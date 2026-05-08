@@ -19,7 +19,13 @@ from src.play.ppo.network import PPONetwork
 def main():
     parser = argparse.ArgumentParser(description="Play Belote against PPO Agent")
     parser.add_argument("--model", type=str, default="models/model.pt", help="Path to the trained model file")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     args = parser.parse_args()
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     # Randomly choose trump (0-3 = card trump, 4 = no-trump, 5 = all-trump)
     trump = random.randint(0, 3)
@@ -32,9 +38,10 @@ def main():
     # Initialize agents
     network = PPONetwork()
     network.load_state_dict(torch.load(args.model, map_location=torch.device('cpu')))
+    network.eval()
     print(f"Loaded model from {args.model}")
 
-    agents = [Human()] + [PpoAgent(network) for _ in range(3)]
+    agents = [Human()] + [PpoAgent(network, deterministic=True) for _ in range(3)]
 
     # Initialize Simulator
     rules = Rules()

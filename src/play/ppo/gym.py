@@ -1,4 +1,5 @@
 import os
+import random
 import torch
 import numpy as np
 from typing import List, Tuple
@@ -24,7 +25,18 @@ class Gym:
         self.model_dir = model_dir
         os.makedirs(model_dir, exist_ok=True)
 
-        # Initialize RNG with seed for reproducibility
+        # Seed all RNG sources for reproducibility.
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        if torch.backends.cudnn.is_available():
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
+        # Initialize NumPy generator for game sampling
         self.rng = np.random.default_rng(seed)
 
         # Initialize Network and Agent
@@ -36,7 +48,7 @@ class Gym:
 
         # Predefined opponents
         self.soft_player       = SoftPlayer()
-        self.agent_player      = PpoAgent(self.network, rng=self.rng)
+        self.agent_player      = PpoAgent(self.network, rng=self.rng, deterministic=True)
         self.randomer_player   = RandomChooser()
         self.aggressive_player = AggressivePlayer()
 
@@ -95,8 +107,8 @@ class Gym:
             network.eval()
 
             self.network      = network
-            self.agent        = PpoAgent(network, rng=self.rng)
-            self.agent_player = PpoAgent(network, rng=self.rng)
+            self.agent        = PpoAgent(network, rng=self.rng, deterministic=False)
+            self.agent_player = PpoAgent(network, rng=self.rng, deterministic=True)
 
             phase_rewards.append(scores)
 

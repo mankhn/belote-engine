@@ -251,7 +251,7 @@ def main():
     network.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     network.eval()
 
-    agent = PpoAgent(network)
+    agent = PpoAgent(network, deterministic=True)
     rules = Rules()
     scenarios = create_test_scenarios()
 

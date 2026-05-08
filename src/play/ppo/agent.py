@@ -10,10 +10,16 @@ from .network import PPONetwork
 
 
 class PpoAgent(Agent):
-    def __init__(self, network: PPONetwork, rng: Optional[np.random.Generator] = None):
+    def __init__(
+        self,
+        network: PPONetwork,
+        rng: Optional[np.random.Generator] = None,
+        deterministic: bool = False,
+    ):
         super().__init__()
         self.network = network
         self.device = next(network.parameters()).device
+        self.deterministic = deterministic
         
         # Create separate optimizers for each network + shared embedding
         self.optimizers = {
@@ -44,14 +50,21 @@ class PpoAgent(Agent):
         state_batch = self._batch_state(state)
         state_batch['legal_actions'] = mask.unsqueeze(0)
 
+        was_training = self.network.training
+        self.network.eval()
         with torch.no_grad():
             outputs = self.network(state_batch)
+        if was_training:
+            self.network.train()
 
         card_logits = outputs['card_policy'][0]  # [32]
         probs = torch.softmax(card_logits, dim=0)
 
         dist = torch.distributions.Categorical(probs)
-        action_idx_tensor = dist.sample()
+        if self.deterministic:
+            action_idx_tensor = torch.argmax(probs)
+        else:
+            action_idx_tensor = dist.sample()
         action_idx = action_idx_tensor.item()
 
         chosen_action = action_map[action_idx]

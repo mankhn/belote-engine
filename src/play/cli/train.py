@@ -2,8 +2,10 @@ import argparse
 import sys
 import os
 
-# Add project root to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+# Add repository root to path (not src/) to avoid shadowing stdlib modules like `types`.
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from src.play.ppo.gym import Gym
 
@@ -13,8 +15,8 @@ def main():
     parser.add_argument("--games-per-phase", type=int, default=100, help="Number of games per phase, default is 100")
     parser.add_argument("--model-dir", type=str, default="models", help="Directory to save/load models, default is 'models'")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility, default is 42")
-    parser.add_argument("--opponents", type=str, default="random,aggressive,soft,agent", 
-                        help="Comma-separated opponent types: random, aggressive, soft, agent")
+    parser.add_argument("--opponents", type=str, default="random,aggressive,soft,agent,agent,agent", 
+                        help="Comma-separated opponent types: random, aggressive, soft, agent, agent, agent,")
     
     args = parser.parse_args()
     
